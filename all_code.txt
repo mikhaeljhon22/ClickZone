@@ -1,0 +1,897 @@
+=== START OF ALL CODE ===
+
+=== FILE: ./application/user/user.application-service.go ===
+
+package user
+
+=== END OF ./application/user/user.application-service.go ===
+
+=== FILE: ./config/datastore/redis.connect.go ===
+
+package datastore
+
+import (
+	"os"
+
+	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
+)
+
+func RedisConnect() *redis.Client {
+	_ = godotenv.Load()
+
+	host := getEnv("REDIS_HOST", "")
+	client := redis.NewClient(&redis.Options{
+		Addr:     host,
+		Password: "",
+		DB:       0,
+	})
+	return client
+}
+
+func getEnv(key, defaultVal string) string {
+	if val, exists := os.LookupEnv(key); exists {
+		return val
+	}
+	return defaultVal
+}
+
+=== END OF ./config/datastore/redis.connect.go ===
+
+=== FILE: ./config/db/mongo.connect.go ===
+
+package db
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+func ConnectMongoDB() (*mongo.Client, error) {
+	mongoURL := os.Getenv("MONGO_URL")
+	if mongoURL == "" {
+		return nil, fmt.Errorf("MONGO_URL environment variable is not set")
+	}
+
+	mongoPassword := os.Getenv("MONGO_PASSWORD")
+	if mongoPassword != "" {
+		mongoURL = replaceAll(mongoURL, "<password>", mongoPassword)
+	}
+
+	clientOptions := options.Client().
+		ApplyURI(mongoURL).
+		SetConnectTimeout(10 * time.Second).
+		SetServerSelectionTimeout(10 * time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := mongo.Connect(ctx, clientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
+	}
+
+	if err := client.Ping(ctx, nil); err != nil {
+		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
+	}
+
+	return client, nil
+}
+
+func replaceAll(s, old, new string) string {
+	result := ""
+	i := 0
+	for i < len(s) {
+		if i+len(old) <= len(s) && s[i:i+len(old)] == old {
+			result += new
+			i += len(old)
+		} else {
+			result += string(s[i])
+			i++
+		}
+	}
+	return result
+}
+
+=== END OF ./config/db/mongo.connect.go ===
+
+=== FILE: ./config/db/postgresql.connect.go ===
+
+package db
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+func NewGORMConnection() *gorm.DB {
+	_ = godotenv.Load()
+
+	host := getEnv("DB_HOST", "")
+	port := getEnv("DB_PORT", "")
+	user := getEnv("DB_USER", "")
+	password := getEnv("DB_PASSWORD", "")
+	dbname := getEnv("DB_NAME", "")
+	sslmode := getEnv("DB_SSLMODE", "")
+	timezone := getEnv("DB_TIMEZONE", "")
+
+	dsn := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
+		host, port, user, password, dbname, sslmode, timezone,
+	)
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatal("failed to connect to database: %w", err)
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	if err := sqlDB.Ping(); err != nil {
+		log.Fatal("database ping failed: %w", err)
+	}
+
+	log.Printf("✅ Connected to PostgreSQL (%s@%s:%s/%s)", user, host, port, dbname)
+	return db
+}
+
+func getEnv(key, defaultVal string) string {
+	if val, exists := os.LookupEnv(key); exists {
+		return val
+	}
+	return defaultVal
+}
+
+func getEnvAsInt(key string, defaultVal int) int {
+	if valStr, exists := os.LookupEnv(key); exists {
+		if val, err := strconv.Atoi(valStr); err == nil {
+			return val
+		}
+	}
+	return defaultVal
+}
+
+=== END OF ./config/db/postgresql.connect.go ===
+
+=== FILE: ./config/env.go ===
+
+package config
+
+import (
+	"log"
+	"os"
+
+	"github.com/joho/godotenv"
+)
+
+func LoadEnv() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: .env file not found, using system environment")
+	}
+}
+
+func GetSymmetricKey() []byte {
+	key := os.Getenv("SYMMETRIC_KEY_PASETO")
+	if len(key) != 32 {
+		log.Fatalf("SYMMETRIC_KEY_PASETO harus 32 bytes, saat ini %d bytes", len(key))
+	}
+	return []byte(key)
+}
+
+=== END OF ./config/env.go ===
+
+=== FILE: ./config/messaage_broker/kafka.connect.go ===
+
+package messaagebroker
+
+=== END OF ./config/messaage_broker/kafka.connect.go ===
+
+=== FILE: ./config/messaage_broker/redis.go ===
+
+package messaagebroker
+
+import (
+	"context"
+
+	"github.com/redis/go-redis/v9"
+)
+
+func NewRedisClient() *redis.Client {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB:   0,
+	})
+
+	// Test koneksi (opsional tapi disarankan)
+	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		panic(err)
+	}
+
+	return rdb
+}
+
+=== END OF ./config/messaage_broker/redis.go ===
+
+=== FILE: ./domain/entities/user.go ===
+
+package entities
+
+import (
+	"time"
+)
+
+type User struct {
+	ID           int       `gorm:"primaryKey;autoIncrement"`
+	GameID       string    `gorm:"size:50;unique;not null"`
+	Username     string    `gorm:"size:50;unique;not null"`
+	Gender       string    `gorm:"size:10"`
+	Email        string    `gorm:"size:100;unique;not null"`
+	PasswordHash string    `gorm:"size:255;not null"`
+	CreatedAt    time.Time `gorm:"autoCreateTime"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
+}
+
+type UserLogin struct {
+	ID              int `gorm:"primaryKey;autoIncrement"`
+	UsernameOrEmail string
+	Password        string
+}
+
+=== END OF ./domain/entities/user.go ===
+
+=== FILE: ./domain/interfaces/user.go ===
+
+package interfaces
+
+import (
+	"ClickZone/domain/entities"
+)
+
+type UserService interface {
+	CreateUser(user entities.User) error
+	Login(userLogin entities.UserLogin) error
+}
+
+=== END OF ./domain/interfaces/user.go ===
+
+=== FILE: ./main.go ===
+
+package main
+
+import (
+	"ClickZone/config/datastore"
+	"ClickZone/config/db"
+	"ClickZone/domain/entities"
+	userservicegorm "ClickZone/ports/user"
+	routeuser "ClickZone/route/user"
+	schemaapplication "ClickZone/schema-application"
+	"crypto/tls"
+	"log"
+	"net/http"
+	"time"
+
+	"gorm.io/gorm"
+)
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func startHTTPServer(dbConn *gorm.DB) {
+
+	mux := http.NewServeMux()
+
+	// Basic routes
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte("🚀 HTTP server running (NO TLS)\n\nAvailable endpoints:\n- POST /api/test-user\n- GET /api/users\n- POST /attack\n- /ws (WebSocket)"))
+	})
+
+	userServiceGorm := userservicegorm.NewUserService(dbConn)
+	routeUser := routeuser.NewUserRoute(userServiceGorm)
+	mux.HandleFunc("/api/create/user", routeUser.CreateUser)
+	mux.HandleFunc("/api/login/user", routeUser.Login)
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		status := "healthy"
+		if dbConn == nil {
+			status = "healthy (no db)"
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status": "` + status + `", "timestamp": "` + time.Now().Format(time.RFC3339) + `"}`))
+	})
+
+	server := &http.Server{
+		Addr:         ":8084",
+		Handler:      corsMiddleware(mux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	log.Println("🌐 HTTP server running on http://localhost:8084")
+	log.Fatal(server.ListenAndServe())
+}
+
+func startWSServer(db *gorm.DB) {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil {
+			http.Error(w, "WSS only", http.StatusUpgradeRequired)
+			return
+		}
+
+		conn, err := schemaapplication.Upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println("WSS upgrade error:", err)
+			return
+		}
+		defer conn.Close()
+
+		schemaapplication.BroadcastAttack(w, r, conn)
+
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				log.Println("WSS closed")
+				break
+			}
+		}
+	})
+
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{"h2", "http/1.1"},
+	}
+
+	server := &http.Server{
+		Addr:         ":8443",
+		Handler:      corsMiddleware(mux),
+		TLSConfig:    tlsConfig,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	log.Println("🔐 WSS server running on wss://localhost:8443/ws")
+	log.Fatal(server.ListenAndServeTLS("localhost.pem", "localhost-key.pem"))
+}
+
+func main() {
+
+	dbConn := db.NewGORMConnection()
+	log.Println("Connected to database via db package")
+
+	dbConn.AutoMigrate(
+		&entities.User{},
+	)
+
+	redisConnection := datastore.RedisConnect()
+	log.Println("Success connect to redis", redisConnection)
+	_, err := db.ConnectMongoDB()
+	if err != nil {
+		log.Fatal("error connect mongo", err)
+	}
+	log.Println("Success connect to mongo")
+	log.Println("Database migration completed")
+
+	startHTTPServer(dbConn)
+
+	log.Println("Application started successfully!")
+	log.Println("Health check: http://localhost:8084/health")
+	// log.Println("🔌 WebSocket: ws://localhost:8084/ws")
+	// log.Println("🔐 Secure WebSocket: wss://localhost:8443/ws")
+
+	select {}
+
+}
+
+=== END OF ./main.go ===
+
+=== FILE: ./ports/user/user.port.go ===
+
+package userservicegorm
+
+import (
+	"ClickZone/domain/entities"
+	"errors"
+	"log"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+)
+
+type UserServiceGorm struct {
+	db *gorm.DB
+}
+
+func NewUserService(db *gorm.DB) *UserServiceGorm {
+	return &UserServiceGorm{db: db}
+}
+func (s *UserServiceGorm) CreateUser(user entities.User) error {
+	var count int64
+
+	if err := s.db.Model(&entities.User{}).
+		Where("username = ?", user.Username).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errors.New("username sudah digunakan")
+	}
+
+	if err := s.db.Model(&entities.User{}).
+		Where("email = ?", user.Email).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errors.New("email sudah digunakan")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(user.PasswordHash), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	user.PasswordHash = string(hash)
+
+	user.CreatedAt = time.Now()
+	user.UpdatedAt = time.Now()
+
+	if err := s.db.Create(&user).Error; err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *UserServiceGorm) Login(userLogin entities.UserLogin) (string, error) {
+	if userLogin.UsernameOrEmail == "" || userLogin.Password == "" {
+		return "", errors.New("username/email dan password harus diisi")
+	}
+
+	var user entities.User
+	var query string
+	var value string = userLogin.UsernameOrEmail
+
+	if strings.Contains(userLogin.UsernameOrEmail, "@") {
+		query = "email = ?"
+	} else {
+		query = "username = ?"
+	}
+
+	if err := s.db.Where(query, value).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", errors.New("akun tidak ditemukan")
+		}
+		return "", nil
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(userLogin.Password)); err != nil {
+		log.Fatalf("password salah")
+	}
+	return user.GameID, nil
+}
+
+=== END OF ./ports/user/user.port.go ===
+
+=== FILE: ./route/user/main.go ===
+
+package routeuser
+
+import (
+	"ClickZone/domain/entities"
+	userservicegorm "ClickZone/ports/user"
+	utilspaseto "ClickZone/utils/auth"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+)
+
+type UserRoute struct {
+	userService *userservicegorm.UserServiceGorm
+}
+
+func NewUserRoute(userService *userservicegorm.UserServiceGorm) *UserRoute {
+	return &UserRoute{userService: userService}
+}
+
+func (ur *UserRoute) CreateUser(w http.ResponseWriter, r *http.Request) {
+	type Request struct {
+		GameID   string `json:"gameId" validate:"required"`
+		Username string `json:"username" validate:"required,min=3,max=50"`
+		Gender   string `json:"gender" validate:"omitempty,oneof=male female other"`
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required,min=6"`
+	}
+
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(400)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	user := entities.User{
+		GameID:       req.GameID,
+		Username:     req.Username,
+		Email:        req.Email,
+		Gender:       req.Gender,
+		PasswordHash: req.Password,
+	}
+	if err := ur.userService.CreateUser(user); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "User created successfully",
+	})
+}
+
+func (ur *UserRoute) Login(w http.ResponseWriter, r *http.Request) {
+	type Request struct {
+		UsernameOrEmail string `json:"usernameOrEmail" validate:"required"`
+		Password        string `json:"password" validate:"required"` // Fixed typo: "passworrd" → "password"
+	}
+
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(400)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	userLogin := entities.UserLogin{
+		UsernameOrEmail: req.UsernameOrEmail,
+		Password:        req.Password,
+	}
+
+	gameID, err := ur.userService.Login(userLogin)
+	if err != nil {
+		fmt.Errorf(err.Error())
+		w.WriteHeader(401)
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+	payloadToken := utilspaseto.TokenPayload{
+		GameID:   gameID,
+		ExpireAt: time.Now().Add(30 * 24 * time.Hour),
+	}
+	token, err := utilspaseto.GenerateToken(payloadToken)
+	if err != nil {
+		fmt.Errorf("error token generate %w", err.Error())
+	}
+	fmt.Println(token)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Login successful",
+	})
+}
+
+=== END OF ./route/user/main.go ===
+
+=== FILE: ./schema-application/battle-click.application.go ===
+
+package schemaapplication
+
+import (
+	messagebroker "ClickZone/schema-application/message-broker"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
+
+	"github.com/gorilla/websocket"
+)
+
+type PlayerAttackData struct {
+	AttackPoint int
+	ClanColour  string
+}
+
+var (
+	playerAttackMap     = make(map[string]PlayerAttackData)
+	playerAttackMapLock sync.RWMutex
+	rdb                 = messagebroker.RedisConnect()
+)
+var Upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+func SendAttackClickBattle(w http.ResponseWriter, r *http.Request) {
+	type Request struct {
+		PlayerID    string `json:"player_id"`
+		AttackPoint int    `json:"attack_point"`
+		ClanColour  string `json:"clan_colour"`
+	}
+
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	playerAttackMapLock.Lock()
+	playerAttackMap[req.PlayerID] = PlayerAttackData{
+		AttackPoint: req.AttackPoint,
+		ClanColour:  req.ClanColour,
+	}
+	channelName := req.PlayerID + "_attack"
+	fmt.Printf("Type of channelName is %T\n", channelName)
+
+	jsonMarshal, err := json.Marshal(map[string]interface{}{
+		"player_id":    req.PlayerID,
+		"attack_point": req.AttackPoint,
+		"clan_colour":  req.ClanColour,
+	})
+	if err != nil {
+		fmt.Println("error message to json marshal %v", err)
+	}
+	messagebroker.Publish(rdb, channelName, jsonMarshal)
+
+	playerAttackMapLock.Unlock()
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":      "attack_received",
+		"player":      req.PlayerID,
+		"clan_colour": req.ClanColour,
+	})
+}
+func BroadcastAttack(w http.ResponseWriter, r *http.Request, conn *websocket.Conn) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Private-Network", "true")
+	playerID := r.URL.Query().Get("playerID")
+	if playerID == "" {
+		return
+	}
+	type Request struct {
+		PlayerID    string `json:"player_id"`
+		AttackPoint int    `json:"attack_point"`
+		ClanColour  string `json:"clan_colour"`
+	}
+
+	channelName := playerID + "_attack"
+	msgChan := messagebroker.Subscribe(rdb, channelName)
+
+	for msg := range msgChan {
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(msg.Payload), &payload); err != nil {
+			fmt.Println("Invalid JSON from Redis:", err)
+			continue
+		}
+
+		if err := conn.WriteJSON(payload); err != nil {
+			fmt.Println("WS write error:", err)
+			return
+		}
+
+	}
+}
+
+=== END OF ./schema-application/battle-click.application.go ===
+
+=== FILE: ./schema-application/message-broker/redis.pubsub.go ===
+
+package messagebroker
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/redis/go-redis/v9"
+)
+
+var (
+	ctx = context.Background()
+)
+
+func RedisConnect() *redis.Client {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "",
+		DB:       0,
+	})
+
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		log.Fatalf("Gagal connect ke Redis: %v", err)
+	}
+	fmt.Println("Redis connected")
+	return rdb
+}
+
+func Publish(rdb *redis.Client, channel string, message any) error {
+	err := rdb.Publish(ctx, channel, message).Err()
+	if err != nil {
+		fmt.Println("error ", err)
+		return fmt.Errorf("publish error: %v", err)
+	}
+	fmt.Printf("Published message '%s' ke channel '%s'\n", message, channel)
+	return nil
+}
+
+func Subscribe(rdb *redis.Client, channel string) <-chan *redis.Message {
+	sub := rdb.Subscribe(ctx, channel)
+	_, err := sub.Receive(ctx)
+	if err != nil {
+		log.Fatalf("Subscribe error: %v", err)
+	}
+
+	ch := sub.Channel()
+	fmt.Printf("Subscribed ke channel '%s', menunggu pesan...\n", channel)
+	payloadChan := make(chan *redis.Message)
+
+	go func() {
+		defer close(payloadChan)
+		for msg := range ch {
+			payloadChan <- msg
+		}
+	}()
+	return payloadChan
+}
+
+=== END OF ./schema-application/message-broker/redis.pubsub.go ===
+
+=== FILE: ./services/user/main.go ===
+
+package userservice
+
+import (
+	"ClickZone/domain/entities"
+	userPort "ClickZone/ports/user"
+
+	"gorm.io/gorm"
+)
+
+type UserService struct {
+	db       *gorm.DB
+	userPort *userPort.UserServiceGorm
+}
+
+func NewUserService(db *gorm.DB) *UserService {
+	return &UserService{db: db}
+}
+
+func (us *UserService) CreateUser(user entities.User) error {
+	return us.userPort.CreateUser(user)
+}
+
+func (us *UserService) Login(userLogin entities.UserLogin) (string, error) {
+	return us.userPort.Login(userLogin)
+}
+
+=== END OF ./services/user/main.go ===
+
+=== FILE: ./utils/auth/paseto.init.go ===
+
+package utilspaseto
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Payload struct {
+	ID        uuid.UUID `json:"id"`
+	GameID    string    `json:"gameID"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiryAt  time.Time `json:"expiry_at"`
+}
+
+func NewPayload(gameID string, duration time.Duration) (*Payload, error) {
+
+	payload := &Payload{
+		GameID:    gameID,
+		CreatedAt: time.Now(),
+		ExpiryAt:  time.Now().Add(duration),
+	}
+
+	return payload, nil
+}
+
+=== END OF ./utils/auth/paseto.init.go ===
+
+=== FILE: ./utils/auth/paseto.service.go ===
+
+package utilspaseto
+
+import (
+	"crypto/ed25519"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/o1egl/paseto"
+)
+
+type TokenPayload struct {
+	GameID   string
+	ExpireAt time.Time
+}
+
+var (
+	b, _        = hex.DecodeString("1eb9dbbbbc047c03fd70604e0071f0987e16b28b757225c11f00415d0e20b1a2")
+	publicKey   = ed25519.PublicKey(b)
+	bPrivate, _ = hex.DecodeString("b4cbfb43df4ce210727d953e4a713307fa19bb7d9f85041438d9e11b942a37741eb9dbbbbc047c03fd70604e0071f0987e16b28b757225c11f00415d0e20b1a2")
+	privateKey  = ed25519.PrivateKey(bPrivate)
+	footer      = "some footer"
+)
+
+func GenerateToken(payload TokenPayload) (string, error) {
+
+	jsonToken := paseto.JSONToken{
+		Expiration: payload.ExpireAt,
+	}
+
+	jsonToken.Set("gameID", payload.GameID)
+
+	token, err := paseto.NewV2().Sign(privateKey, jsonToken, footer)
+	if err != nil {
+		return "", fmt.Errorf("error generate paseto token %w", err)
+	}
+	return token, nil
+}
+
+func VerifyToken(token string) (string, bool) {
+	var newJsonToken paseto.JSONToken
+	var newFooter string
+	if err := paseto.NewV2().Verify(token, publicKey, &newJsonToken, &newFooter); err != nil {
+		return "", false
+	}
+	decryptToken := &TokenPayload{
+		GameID:   newJsonToken.Get("gameID"),
+		ExpireAt: newJsonToken.Expiration,
+	}
+	decryptJsonBytes, err := json.Marshal(decryptToken)
+	if err != nil {
+		log.Println("JSON marshal error:", err)
+	}
+
+	return string(decryptJsonBytes), true
+}
+
+=== END OF ./utils/auth/paseto.service.go ===
+
+=== END OF ALL CODE ===
